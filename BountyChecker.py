@@ -33,14 +33,16 @@ class OverlayApp:
         self.root.attributes("-alpha", 0.5)
 
         # Initialize variables
-        self.enable_overlay = True
         self.first_run = True
         self.last_line_index = self.last_access = self.bountycycles = 0
         self.start = self.end = self.elapsed = self.best_elapsed = 0
-        self.first_elapsed = True
-        self.start_bool = self.drone_bool = False
+        self.start_bool = self.drone_bool = self.stage_bool = False
         self.start_time = self.counts = self.stages_int = self.drone_start = self.drone_end = self.drone_elapse = self.drone_time = 0
+        self.stage_time = self.stage_start = self.stage_end = self.stage_elapse = 0
         self.drone_best = 0
+        self.stages_start = ["ResIntro", "AssIntro", "CapIntro", "CacheIntro", "HijackIntro"]
+        self.stages_end = ["ResWin","AssWin", "CapWin", "CacheWin", "HijackWin"]
+        self.tent_mapping = {"TentA": "Tent A:  ", "TentB": "Tent B:  ", "TentC": "Tent C:  "}
 
         # Create labels
         self.label1 = tk.Label(self.root, text="", fg="white", bg="black",
@@ -107,20 +109,22 @@ class OverlayApp:
         drone[0] = str(datetime.timedelta(seconds=self.drone_time if self.drone_bool else self.drone_elapse))
         best = str(datetime.timedelta(seconds=self.best_elapsed))
         drone[1] = str(datetime.timedelta(seconds=self.drone_best))
+        stage = str(datetime.timedelta(seconds=self.stage_time if self.stage_bool else self.stage_elapse))
 
         # Ensure millisecond precision
         def append_milliseconds(time_str):
-            return time_str if '.' in time_str else time_str + ".000"
+            return time_str[:11] if '.' in time_str else time_str + ".000"
 
         finish = append_milliseconds(finish)
         best = append_milliseconds(best)
         drone[0] = append_milliseconds(drone[0])
         drone[1] = append_milliseconds(drone[1])
+        stage = append_milliseconds(stage)
 
         # Update label with formatted string
         self.label2.config(
-            text=f" Bounties Completed: {self.bountycycles}  Timer: {finish[:11]}  "
-                f"Best Time: {best[:11]}  Drone Time: {drone[0][:11]}  Best Drone: {drone[1][:11]} "
+            text=f" Bounties Completed: {self.bountycycles}  Timer: {finish}  "
+                f"Best Time: {best}  Drone Timer: {drone[0]}  Best Drone: {drone[1]}  Stage Timer: {stage} "
         )
 
         # Update window size
@@ -148,7 +152,9 @@ class OverlayApp:
                 time.sleep(1)
                 self.start_time += 1
                 if self.drone_bool:
-                    self.drone_time += 1          
+                    self.drone_time += 1
+                if self.stage_bool:
+                    self.stage_time += 1
 
     def data_parser(self):
         while True:
@@ -211,17 +217,15 @@ class OverlayApp:
                     continue
 
                 self.stages_int = len(json_data['jobStages'])
-                if any(stage not in self.wanted_bounties for stage in json_data['jobStages']):
-                    # Update overlay with translation in red
-                    stages = [self.bounty_translation.get(stage, stage) for stage in json_data['jobStages']]
-                    stages_string = " -> ".join(stages)
-                    self.update_overlay(stages_string, "red")
-                    continue
-
-                # Valid stages found, update overlay with translation in green
                 stages = [self.bounty_translation.get(stage, stage) for stage in json_data['jobStages']]
                 stages_string = " -> ".join(stages)
-                self.update_overlay(stages_string, "green")
+                tent = next((label for key, label in self.tent_mapping.items() if key in json_data['jobId']), "Konzu:  ")
+                if any(stage not in self.wanted_bounties for stage in json_data['jobStages']):
+                    # Update overlay with translation in red
+                    self.update_overlay(tent + stages_string, "red")
+                    continue
+                # Valid stages found, update overlay with translation in green
+                self.update_overlay(tent + stages_string, "green")
 
             except Exception as e:
                 self.logger.error(f"Please Report this String4: {e} | Line: {line_data}")
@@ -243,10 +247,9 @@ class OverlayApp:
 
             try:
                 if message == 'Script [Info]: EidolonMP.lua: EIDOLONMP: Going back to hub':
-                    self.drone_time = 0
-                    self.drone_bool = False
-                    self.start_time = 0
-                    self.start_bool = False
+                    self.drone_time = self.drone_elapse = self.start_time = self.elapsed = self.stage_time = self.stage_elapse = 0
+                    self.drone_bool = self.start_bool = self.stage_bool = False
+                    self.counts = 0
 
                 elif message in (
                     'Net [Info]: MISSION_READY message: 1',
@@ -259,24 +262,28 @@ class OverlayApp:
 
                 elif 'Script [Info]: HudRedux.lua: Queuing new transmission:' in message:
                     if "BountyFail" in message:
-                        self.drone_time = 0
-                        self.drone_bool = False
-                        self.start_time = 0
-                        self.start_bool = False
-                    elif "HijackIntro" in message:
-                        self.drone_start = timestamp
-                        self.drone_time = 0
-                        self.drone_bool = True
-                    elif "HijackWin" in message:
-                        self.drone_end = timestamp
-                        if self.drone_start != 0:
-                            self.drone_elapse = self.drone_end - self.drone_start
-                        self.drone_bool = False
-                        if (self.drone_best == 0) or (self.drone_elapse <= self.drone_best):
-                            if self.drone_elapse >= 0:
-                                self.drone_best = self.drone_elapse
-                            else:
-                                print(f"Start: {self.drone_start}\t End: {self.drone_end}")
+                        self.drone_time = self.drone_elapse = self.start_time = self.elapsed = self.stage_time = self.stage_elapse = 0
+                        self.drone_bool = self.start_bool = self.stage_bool = False
+                        self.counts = 0
+                    #Stage Timer
+                    elif any(stage in message for stage in self.stages_start):
+                        self.stage_start = self.drone_start = timestamp
+                        self.stage_time = self.drone_time = 0
+                        self.stage_bool = True
+                        if "HijackIntro" in message:
+                            self.drone_bool = True
+                    elif any(stage in message for stage in self.stages_end):
+                        self.stage_end = self.drone_end = timestamp
+                        if self.stage_start != 0:
+                            self.stage_elapse = self.stage_end - self.stage_start
+                        if "HijackWin" in message:
+                            if self.drone_start != 0:
+                                self.drone_elapse = self.stage_elapse
+                            if (self.drone_best == 0) or (self.drone_elapse <= self.drone_best):
+                                if self.drone_elapse >= 0:
+                                    self.drone_best = self.drone_elapse
+                        self.stage_start = self.drone_start = 0
+                        self.stage_bool = self.drone_bool = False
 
                 elif 'Script [Info]: EidolonMissionComplete.lua: EidolonMissionComplete:: Got Reward:' in message: 
                     self.counts += 1
@@ -284,12 +291,11 @@ class OverlayApp:
                         self.end = timestamp
                         self.start_bool = False
                         self.bountycycles += 1
-                    
-                    #Calculate elapsed time if conditions are met
-                    if self.end > self.start:
-                        self.elapsed = self.end - self.start
-                    if (self.best_elapsed == 0) or (self.elapsed <= self.best_elapsed):
-                        self.best_elapsed = self.elapsed
+                        #Calculate elapsed time if conditions are met
+                        if self.end > self.start:
+                            self.elapsed = self.end - self.start
+                        if (self.best_elapsed == 0) or (self.elapsed <= self.best_elapsed):
+                            self.best_elapsed = self.elapsed
                      
             except Exception as e:
                 self.logger.error(f"Please Report this String5: {e} | Line: {line_data}")
