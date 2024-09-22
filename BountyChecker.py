@@ -42,7 +42,10 @@ class OverlayApp:
         self.drone_best = 0
         self.stages_start = ["ResIntro", "AssIntro", "CapIntro", "CacheIntro", "HijackIntro"]
         self.stages_end = ["ResWin","AssWin", "CapWin", "CacheWin", "HijackWin"]
-        self.tent_mapping = {"TentA": "Tent A:  ", "TentB": "Tent B:  ", "TentC": "Tent C:  "}
+        self.tent_mapping = {"TentA": "Tent A: ", "TentB": "Tent B: ", "TentC": "Tent C: "}
+        self.dataset = []  # Store inliers
+        self.mean = 0  # Running average
+        self.elapsed_prev = 0
 
         # Create labels
         self.label1 = tk.Label(self.root, text="", fg="white", bg="black",
@@ -63,6 +66,7 @@ class OverlayApp:
         self.logger = setup_custom_logger('Aya Bounty Tracker')
 
         self.path = os.getenv('LOCALAPPDATA') + "/Warframe/EE.log"
+        #self.path = os.getenv('HOMEPATH') + "/OneDrive/BountyChecker-main/EE6.log"
         
         # Fetching bounty data
         wanted_bounties = requests.get("https://gist.githubusercontent.com/ManInTheWallPog/d9cc2c83379a74ef57f0407b0d84d9b2/raw/").content
@@ -109,7 +113,8 @@ class OverlayApp:
         drone[0] = str(datetime.timedelta(seconds=self.drone_time if self.drone_bool else self.drone_elapse))
         best = str(datetime.timedelta(seconds=self.best_elapsed))
         drone[1] = str(datetime.timedelta(seconds=self.drone_best))
-        stage = str(datetime.timedelta(seconds=self.stage_time if self.stage_bool else self.stage_elapse))
+        #stage = str(datetime.timedelta(seconds=self.stage_time if self.stage_bool else self.stage_elapse))
+        mean = str(datetime.timedelta(seconds=self.mean))
 
         # Ensure millisecond precision
         def append_milliseconds(time_str):
@@ -119,13 +124,12 @@ class OverlayApp:
         best = append_milliseconds(best)
         drone[0] = append_milliseconds(drone[0])
         drone[1] = append_milliseconds(drone[1])
-        stage = append_milliseconds(stage)
+        mean = append_milliseconds(mean)
+        #stage = append_milliseconds(stage)
 
         # Update label with formatted string
-        self.label2.config(
-            text=f" Bounties Completed: {self.bountycycles}  Timer: {finish}  "
-                f"Best Time: {best}  Drone Timer: {drone[0]}  Best Drone: {drone[1]}  Stage Timer: {stage} "
-        )
+        self.label2.config(text=f" Bounties Completed: {self.bountycycles}  Timer: {finish}  "
+                                f"Best Time: {best}  Avg. Time: {mean}  Drone Timer: {drone[0]}  Best Drone: {drone[1]} ")
 
         # Update window size
         self.root.update_idletasks()
@@ -138,6 +142,33 @@ class OverlayApp:
         y = 0
 
         self.root.geometry(f'{width}x{height}+{int(x)}+{int(y)}')
+
+    def calculate_running_average(self, value):
+        # Add new value to the data
+        self.dataset.append(value)
+
+        if len(self.dataset) < 4:  # Need at least 4 values to reliably compute IQR
+            self.mean = sum(self.dataset) / len(self.dataset) if self.dataset else 0
+            return
+        
+        sorted_data = sorted(self.dataset)
+        n = len(sorted_data)
+        
+        Q1 = sorted_data[n // 4]  # 25th percentile
+        Q3 = sorted_data[3 * n // 4]  # 75th percentile
+        IQR = Q3 - Q1
+        
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+        
+        # Filter data points that are not outliers
+        filtered_data = [x for x in self.dataset if lower_bound <= x <= upper_bound]
+        
+        # Update mean
+        if filtered_data:
+            self.mean = sum(filtered_data) / len(filtered_data)
+        else:
+            self.mean = 0  # No valid data points to average
 
     def run(self):
         threading.Thread(target=self.clock).start()
@@ -215,7 +246,9 @@ class OverlayApp:
                 # Validate the JSON keys
                 if not all(key in json_data for key in ['jobTier', 'jobStages', 'job']):
                     continue
-
+                if any(stage not in self.bounty_translation for stage in json_data['jobStages']):
+                    continue
+                
                 self.stages_int = len(json_data['jobStages'])
                 stages = [self.bounty_translation.get(stage, stage) for stage in json_data['jobStages']]
                 stages_string = " -> ".join(stages)
@@ -296,6 +329,9 @@ class OverlayApp:
                             self.elapsed = self.end - self.start
                         if (self.best_elapsed == 0) or (self.elapsed <= self.best_elapsed):
                             self.best_elapsed = self.elapsed
+                        if self.elapsed != self.elapsed_prev and self.elapsed != 0:
+                            self.calculate_running_average(self.elapsed)    
+                            self.elapsed_prev = self.elapsed
                      
             except Exception as e:
                 self.logger.error(f"Please Report this String5: {e} | Line: {line_data}")
