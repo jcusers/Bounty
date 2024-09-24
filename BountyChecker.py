@@ -66,7 +66,6 @@ class OverlayApp:
         self.logger = setup_custom_logger('Aya Bounty Tracker')
 
         self.path = os.getenv('LOCALAPPDATA') + "/Warframe/EE.log"
-        #self.path = os.getenv('HOMEPATH') + "/OneDrive/BountyChecker-main/EE6.log"
         
         # Fetching bounty data
         wanted_bounties = requests.get("https://gist.githubusercontent.com/ManInTheWallPog/d9cc2c83379a74ef57f0407b0d84d9b2/raw/").content
@@ -327,6 +326,7 @@ class OverlayApp:
                         #Calculate elapsed time if conditions are met
                         if self.end > self.start:
                             self.elapsed = self.end - self.start
+                            print(f"Start: {self.start}  End: {self.end}  Elapsed: {self.elapsed}")
                         if (self.best_elapsed == 0) or (self.elapsed <= self.best_elapsed):
                             self.best_elapsed = self.elapsed
                         if self.elapsed != self.elapsed_prev and self.elapsed != 0:
