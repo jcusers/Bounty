@@ -41,11 +41,18 @@ class OverlayApp:
         self.stage_time = self.stage_start = self.stage_end = self.stage_elapse = 0
         self.drone_best = 0
         self.stages_start = ["ResIntro", "AssIntro", "CapIntro", "CacheIntro", "HijackIntro"]
-        self.stages_end = ["ResWin","AssWin", "CapWin", "CacheWin", "HijackWin"]
+        self.stages_translate_start = {"ResIntro":"Rescue", "AssIntro":"Assassinate", "CapIntro":"Capture", "CacheIntro":"Cache", "HijackIntro":"Drone"}
+        self.stages_translate_end = {"ResWin":"Rescue", "AssWin":"Assassinate", "CapWin":"Capture", "CacheWin":"Cache", "HijackWin":"Drone"}
+        self.stages_end = ["ResWin", "AssWin", "CapWin", "CacheWin", "HijackWin"]
         self.tent_mapping = {"TentA": "Tent A: ", "TentB": "Tent B: ", "TentC": "Tent C: "}
         self.dataset = []  # Store inliers
         self.mean = 0  # Running average
         self.elapsed_prev = 0
+        self.parse_success = False
+        self.stage = ""
+        self.best_stage_elapses = [0,0,0,0,0]
+        self.stage_to_index = {"Rescue": 0,"Assassinate": 1,"Capture": 2,"Cache": 3,"Drone": 4}
+        self.good_bounty = False
 
         # Create labels
         self.label1 = tk.Label(self.root, text="", fg="white", bg="black",
@@ -55,23 +62,47 @@ class OverlayApp:
         self.label1.pack(fill="both", expand=True)
         self.label2.pack(fill="both", expand=True)
 
-        # Configure window positio
+        self.label1.bind("<Button-1>", self.start_drag)
+        self.label1.bind("<ButtonRelease-1>", self.stop_drag)
+        self.label1.bind("<B1-Motion>", self.on_drag)
+        self.label2.bind("<Button-1>", self.start_drag)
+        self.label2.bind("<ButtonRelease-1>", self.stop_drag)
+        self.label2.bind("<B1-Motion>", self.on_drag)
+
+        self.dragging = False
+        self.offset_x = 0
+        self.offset_y = 0
+
+        # Configure window position
         w, h = 0, 40  # Width and Height
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        x = (screen_width / 2) - (w / 2)
+        self.screen_width = self.root.winfo_screenwidth()
+        x = (self.screen_width / 2) - (w / 2)
         self.root.geometry(f'{w}x{h}+{int(x)}+0')
 
         # Set up logger
         self.logger = setup_custom_logger('Aya Bounty Tracker')
 
-        self.path = os.getenv('LOCALAPPDATA') + "/Warframe/EE.log"
-        
+        self.path = os.path.join(os.getenv('LOCALAPPDATA'), "Warframe", "EE.log")
+
         # Fetching bounty data
         wanted_bounties = requests.get("https://gist.githubusercontent.com/ManInTheWallPog/d9cc2c83379a74ef57f0407b0d84d9b2/raw/").content
         bounty_translation = requests.get("https://gist.githubusercontent.com/ManInTheWallPog/02dfd3efdd62ed5b7061dd2e62324fa3/raw/").content
         self.wanted_bounties = json.loads(wanted_bounties.decode('utf-8'))
         self.bounty_translation = json.loads(bounty_translation.decode('utf-8'))
+
+    def start_drag(self, event):
+        self.dragging = True
+        self.offset_x = event.x
+        self.offset_y = event.y
+
+    def stop_drag(self, _):
+        self.dragging = False
+
+    def on_drag(self, event):
+        if self.dragging:
+            x = self.root.winfo_pointerx() - self.offset_x
+            y = self.root.winfo_pointery() - self.offset_y
+            self.root.geometry(f"+{x}+{y}")
 
     def get_last_n_lines(self, file_name):
         # Create an empty list to keep the track of last N lines
@@ -95,6 +126,7 @@ class OverlayApp:
                     list_of_lines.append(line.strip())
                     current_last_index += len(line)
                 else:
+                    time.sleep(0.1)
                     return list_of_lines, current_last_index - len(line), True  # if a partial line was detected
 
         return list_of_lines, current_last_index, False
@@ -104,15 +136,15 @@ class OverlayApp:
         if text != 'same' and text_color != 'same':
             self.label1.config(text=text, fg=text_color)
 
-        # Initialize drone time tracking
-        drone = [0, 0]
+        best_stages = ""
+        if self.stage in self.stage_to_index:
+            index = self.stage_to_index[self.stage]
+            best_stages = str(datetime.timedelta(seconds=self.best_stage_elapses[index]))
 
         # Convert the times to a readable format
         finish = str(datetime.timedelta(seconds=self.start_time if self.start_bool else self.elapsed))
-        drone[0] = str(datetime.timedelta(seconds=self.drone_time if self.drone_bool else self.drone_elapse))
         best = str(datetime.timedelta(seconds=self.best_elapsed))
-        drone[1] = str(datetime.timedelta(seconds=self.drone_best))
-        #stage = str(datetime.timedelta(seconds=self.stage_time if self.stage_bool else self.stage_elapse))
+        stage = str(datetime.timedelta(seconds=self.stage_time if self.stage_bool else self.stage_elapse))
         mean = str(datetime.timedelta(seconds=self.mean))
 
         # Ensure millisecond precision
@@ -121,14 +153,17 @@ class OverlayApp:
 
         finish = append_milliseconds(finish)
         best = append_milliseconds(best)
-        drone[0] = append_milliseconds(drone[0])
-        drone[1] = append_milliseconds(drone[1])
         mean = append_milliseconds(mean)
-        #stage = append_milliseconds(stage)
+        stage = append_milliseconds(stage)
+        best_stages = append_milliseconds(best_stages)
 
         # Update label with formatted string
-        self.label2.config(text=f" Bounties Completed: {self.bountycycles}  Timer: {finish}  "
-                                f"Best Time: {best}  Avg. Time: {mean}  Drone Timer: {drone[0]}  Best Drone: {drone[1]} ")
+        if best_stages == ".000":
+            self.label2.config(text=f" Bounties Completed: {self.bountycycles}  Timer: {finish}  "
+                                f"Best Time: {best}  Avg. Time: {mean} ")
+        else:
+            self.label2.config(text=f" Bounties Completed: {self.bountycycles}  Timer: {finish}  "
+                                f"Best Time: {best}  Avg. Time: {mean}  Stage Timer: {stage}  Best {self.stage}: {best_stages} ")
 
         # Update window size
         self.root.update_idletasks()
@@ -136,8 +171,7 @@ class OverlayApp:
         height = 50    # Fixed height
 
         # Calculate starting coordinates for the window
-        screen_width = self.root.winfo_screenwidth()
-        x = (screen_width / 2) - (width / 2)
+        x = (self.screen_width / 2) - (width / 2)
         y = 0
 
         self.root.geometry(f'{width}x{height}+{int(x)}+{int(y)}')
@@ -181,21 +215,25 @@ class OverlayApp:
                 self.update_overlay("same", "same")
                 time.sleep(1)
                 self.start_time += 1
-                if self.drone_bool:
-                    self.drone_time += 1
                 if self.stage_bool:
                     self.stage_time += 1
+            else:
+                time.sleep(0.5)
 
     def data_parser(self):
         while True:
             try:
+                time.sleep(0.1)
                 checkaccesstime = os.path.getmtime(self.path)
                 if checkaccesstime != self.last_access:
                     self.last_access = checkaccesstime
+                    self.parse_success = False
                     breaker = True
                     while breaker:
                         try:
                             data, current_last_index, breaker = self.get_last_n_lines(self.path)
+                            if not data and not self.first_run:
+                                continue
                         except Exception as e:
                             self.logger.info(f"Error reading EE.log1 {e}")
                         if self.first_run:
@@ -204,10 +242,12 @@ class OverlayApp:
                             self.update_overlay(text, "white")
                         self.parse_lines(data)
                         self.elapse(data)
-                        self.update_overlay("same", "same")
+                        if self.parse_success:
+                            self.update_overlay("same", "same")
                         self.last_line_index = current_last_index
             except Exception as e:
                 self.logger.info(f"Error reading EE.log2 {e}")
+                time.sleep(1)
 
     def parse_lines(self, data):
         for i in range(len(data)):
@@ -245,19 +285,29 @@ class OverlayApp:
                 # Validate the JSON keys
                 if not all(key in json_data for key in ['jobTier', 'jobStages', 'job']):
                     continue
-                if any(stage not in self.bounty_translation for stage in json_data['jobStages']):
-                    continue
-                
+
+                self.parse_success = True
                 self.stages_int = len(json_data['jobStages'])
                 stages = [self.bounty_translation.get(stage, stage) for stage in json_data['jobStages']]
+                if any(stage not in self.bounty_translation for stage in json_data['jobStages']):
+                    count = 0
+                    for stage in stages:
+                        index = stage.rfind("/") + 1
+                        stages[count] = stages[count][index:].replace("Dynamic", "").replace("Narmer", "")
+                        count += 1
+                
                 stages_string = " -> ".join(stages)
                 tent = next((label for key, label in self.tent_mapping.items() if key in json_data['jobId']), "Konzu:  ")
                 if any(stage not in self.wanted_bounties for stage in json_data['jobStages']):
                     # Update overlay with translation in red
                     self.update_overlay(tent + stages_string, "red")
+                    self.good_bounty = False
                     continue
                 # Valid stages found, update overlay with translation in green
                 self.update_overlay(tent + stages_string, "green")
+                if self.good_bounty == False:
+                    print(stages_string)
+                    self.good_bounty = True
 
             except Exception as e:
                 self.logger.error(f"Please Report this String4: {e} | Line: {line_data}")
@@ -282,6 +332,7 @@ class OverlayApp:
                     self.drone_time = self.drone_elapse = self.start_time = self.elapsed = self.stage_time = self.stage_elapse = 0
                     self.drone_bool = self.start_bool = self.stage_bool = False
                     self.counts = 0
+                    self.parse_success = True
 
                 elif message in (
                     'Net [Info]: MISSION_READY message: 1',
@@ -291,31 +342,39 @@ class OverlayApp:
                     self.start_time = 0
                     self.start_bool = True
                     self.counts = 0
+                    self.parse_success = True
 
                 elif 'Script [Info]: HudRedux.lua: Queuing new transmission:' in message:
                     if "BountyFail" in message:
                         self.drone_time = self.drone_elapse = self.start_time = self.elapsed = self.stage_time = self.stage_elapse = 0
                         self.drone_bool = self.start_bool = self.stage_bool = False
                         self.counts = 0
-                    #Stage Timer
+                    #Stage Start
                     elif any(stage in message for stage in self.stages_start):
+                        #print("Start")
                         self.stage_start = self.drone_start = timestamp
                         self.stage_time = self.drone_time = 0
                         self.stage_bool = True
-                        if "HijackIntro" in message:
-                            self.drone_bool = True
+                        stage = next((stage for stage in self.stages_start if stage in message), "")
+                        self.stage = self.stages_translate_start[stage]
+                    #Stage End        
                     elif any(stage in message for stage in self.stages_end):
+                        #print("End")
                         self.stage_end = self.drone_end = timestamp
                         if self.stage_start != 0:
                             self.stage_elapse = self.stage_end - self.stage_start
-                        if "HijackWin" in message:
-                            if self.drone_start != 0:
-                                self.drone_elapse = self.stage_elapse
-                            if (self.drone_best == 0) or (self.drone_elapse <= self.drone_best):
-                                if self.drone_elapse >= 0:
-                                    self.drone_best = self.drone_elapse
+                        stage = next((stage for stage in self.stages_end if stage in message), "")
+                        self.stage = self.stages_translate_end[stage]
+                        #print(f"Stage: {self.stage}")
+                        if self.stage in self.stage_to_index:
+                            index = self.stage_to_index[self.stage]
+                            # Check the conditions for updating the best_stage_elapses
+                            if (self.best_stage_elapses[index] == 0) or (self.stage_elapse <= self.best_stage_elapses[index]):
+                                if self.stage_elapse >= 0:
+                                    self.best_stage_elapses[index] = round(self.stage_elapse, 3)
                         self.stage_start = self.drone_start = 0
                         self.stage_bool = self.drone_bool = False
+                    self.parse_success = True
 
                 elif 'Script [Info]: EidolonMissionComplete.lua: EidolonMissionComplete:: Got Reward:' in message: 
                     self.counts += 1
@@ -326,12 +385,14 @@ class OverlayApp:
                         #Calculate elapsed time if conditions are met
                         if self.end > self.start:
                             self.elapsed = self.end - self.start
-                            print(f"Start: {self.start}  End: {self.end}  Elapsed: {self.elapsed}")
+                            #print(f"Start: {self.start}  End: {self.end}  Elapsed: {self.elapsed}")
                         if (self.best_elapsed == 0) or (self.elapsed <= self.best_elapsed):
-                            self.best_elapsed = self.elapsed
+                            self.best_elapsed = round(self.elapsed, 3)
                         if self.elapsed != self.elapsed_prev and self.elapsed != 0:
                             self.calculate_running_average(self.elapsed)    
                             self.elapsed_prev = self.elapsed
+                            print(f"Best Time: {self.best_elapsed} Avg. Time: {round(self.mean, 3)} Best Rescue: {self.best_stage_elapses[0]} Best Assassinate: {self.best_stage_elapses[1]} Best Capture: {self.best_stage_elapses[2]} Best Cache: {self.best_stage_elapses[3]} Best Drone: {self.best_stage_elapses[4]}")
+                    self.parse_success = True
                      
             except Exception as e:
                 self.logger.error(f"Please Report this String5: {e} | Line: {line_data}")
