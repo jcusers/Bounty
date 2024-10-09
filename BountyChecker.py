@@ -73,11 +73,14 @@ class OverlayApp:
         self.offset_x = 0
         self.offset_y = 0
 
-        # Configure window position
-        w, h = 0, 40  # Width and Height
+        # # Configure window position
+        self.width = max(self.label1.winfo_reqwidth(), self.label2.winfo_reqwidth()) + 2  # Add padding
+        height = 50    # Fixed height
         self.screen_width = self.root.winfo_screenwidth()
-        x = (self.screen_width / 2) - (w / 2)
-        self.root.geometry(f'{w}x{h}+{int(x)}+0')
+        self.x = (self.screen_width / 2) - (self.width / 2)
+        self.y = 0
+        self.center = self.x + (self.width / 2)
+        self.root.geometry(f'{self.width}x{height}+{int(self.x)}+{int(self.y)}')
 
         # Set up logger
         self.logger = setup_custom_logger('Aya Bounty Tracker')
@@ -100,9 +103,10 @@ class OverlayApp:
 
     def on_drag(self, event):
         if self.dragging:
-            x = self.root.winfo_pointerx() - self.offset_x
-            y = self.root.winfo_pointery() - self.offset_y
-            self.root.geometry(f"+{x}+{y}")
+            self.x = self.root.winfo_pointerx() - self.offset_x
+            self.y = self.root.winfo_pointery() - self.offset_y
+            self.center = self.x + (self.width/2)
+            self.root.geometry(f"+{int(self.x)}+{int(self.y)}")
 
     def get_last_n_lines(self, file_name):
         # Create an empty list to keep the track of last N lines
@@ -167,14 +171,13 @@ class OverlayApp:
 
         # Update window size
         self.root.update_idletasks()
-        width = max(self.label1.winfo_reqwidth(), self.label2.winfo_reqwidth()) + 2  # Add padding
+        self.width = max(self.label1.winfo_reqwidth(), self.label2.winfo_reqwidth()) + 2  # Add padding
         height = 50    # Fixed height
 
         # Calculate starting coordinates for the window
-        x = (self.screen_width / 2) - (width / 2)
-        y = 0
+        self.x = self.center - (self.width / 2)
 
-        self.root.geometry(f'{width}x{height}+{int(x)}+{int(y)}')
+        self.root.geometry(f'{self.width}x{height}+{int(self.x)}+{int(self.y)}')
 
     def calculate_running_average(self, value):
         # Add new value to the data
@@ -357,6 +360,8 @@ class OverlayApp:
                         self.stage_bool = True
                         stage = next((stage for stage in self.stages_start if stage in message), "")
                         self.stage = self.stages_translate_start[stage]
+                        # if "HijackIntro" in message:
+                        #     self.drone_bool = True
                     #Stage End        
                     elif any(stage in message for stage in self.stages_end):
                         #print("End")
