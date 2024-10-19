@@ -36,23 +36,19 @@ class OverlayApp:
         self.first_run = True
         self.last_line_index = self.last_access = self.bountycycles = 0
         self.start = self.end = self.elapsed = self.best_elapsed = 0
-        self.start_bool = self.drone_bool = self.stage_bool = False
-        self.start_time = self.counts = self.stages_int = self.drone_start = self.drone_end = self.drone_elapse = self.drone_time = 0
-        self.stage_time = self.stage_start = self.stage_end = self.stage_elapse = 0
-        self.drone_best = 0
-        self.stages_start = ["ResIntro", "AssIntro", "CapIntro", "CacheIntro", "HijackIntro"]
-        self.stages_translate_start = {"ResIntro":"Rescue", "AssIntro":"Assassinate", "CapIntro":"Capture", "CacheIntro":"Cache", "HijackIntro":"Drone"}
-        self.stages_translate_end = {"ResWin":"Rescue", "AssWin":"Assassinate", "CapWin":"Capture", "CacheWin":"Cache", "HijackWin":"Drone"}
-        self.stages_end = ["ResWin", "AssWin", "CapWin", "CacheWin", "HijackWin"]
+        self.start_bool = self.stage_bool = self.parse_success = self.good_bounty = False
+        self.start_time = self.counts = self.stages_int = 0
+        self.stage_time = self.stage_start = self.stage_end = self.stage_elapse = self.elapsed_prev = 0
+        self.stages_start = ["ResIntro", "AssIntro", "CapIntro", "CacheIntro", "HijackIntro", "FinalIntro"]
+        self.stages_translate_start = {"ResIntro":"Rescue", "AssIntro":"Assassinate", "CapIntro":"Capture", "CacheIntro":"Cache", "HijackIntro":"Drone", "FinalIntro":"Capture"}
+        self.stages_translate_end = {"ResWin":"Rescue", "AssWin":"Assassinate", "CapWin":"Capture", "CacheWin":"Cache", "HijackWin":"Drone", "FinalWin":"Capture"}
+        self.stages_end = ["ResWin", "AssWin", "CapWin", "CacheWin", "HijackWin", "FinalWin"]
         self.tent_mapping = {"TentA": "Tent A: ", "TentB": "Tent B: ", "TentC": "Tent C: "}
+        self.stage_to_index = {"Rescue": 0,"Assassinate": 1,"Capture": 2,"Cache": 3,"Drone": 4}
         self.dataset = []  # Store inliers
         self.mean = 0  # Running average
-        self.elapsed_prev = 0
-        self.parse_success = False
         self.stage = ""
         self.best_stage_elapses = [0,0,0,0,0]
-        self.stage_to_index = {"Rescue": 0,"Assassinate": 1,"Capture": 2,"Cache": 3,"Drone": 4}
-        self.good_bounty = False
 
         # Create labels
         self.label1 = tk.Label(self.root, text="", fg="white", bg="black",
@@ -109,8 +105,6 @@ class OverlayApp:
             self.root.geometry(f"+{int(self.x)}+{int(self.y)}")
 
     def get_last_n_lines(self, file_name):
-        # Create an empty list to keep the track of last N lines
-        list_of_lines = []
         current_last_index = self.last_line_index
 
         with open(file_name, 'r', encoding="utf-8", errors='ignore') as read_obj:
@@ -119,21 +113,23 @@ class OverlayApp:
             # Get the current position of pointer i.e eof
             last_line = read_obj.tell()
             if current_last_index == 0:
-                return list_of_lines, last_line, False
+                self.last_line_index = last_line
+                return  # No lines to yield if the index is 0
             
             if last_line < current_last_index:
-                return list_of_lines, current_last_index, False
-            
-            read_obj.seek(current_last_index)
-            for line in read_obj:
+                return  # Return early if there are no new lines
+
+            while True:
+                read_obj.seek(self.last_line_index)
+                line = read_obj.readline()
                 if line.endswith('\n'):
-                    list_of_lines.append(line.strip())
+                    # Yield each line as it is read
                     current_last_index += len(line)
+                    self.last_line_index = current_last_index
+                    yield line.strip()
                 else:
                     time.sleep(0.1)
-                    return list_of_lines, current_last_index - len(line), True  # if a partial line was detected
-
-        return list_of_lines, current_last_index, False
+                    self.last_line_index = current_last_index  # Update index
 
     def update_overlay(self, text, text_color):
         # Update label if necessary
@@ -226,36 +222,30 @@ class OverlayApp:
     def data_parser(self):
         while True:
             try:
-                time.sleep(0.1)
-                checkaccesstime = os.path.getmtime(self.path)
-                if checkaccesstime != self.last_access:
-                    self.last_access = checkaccesstime
+                while True:
+                    time.sleep(0.1)
                     self.parse_success = False
-                    breaker = True
-                    while breaker:
-                        try:
-                            data, current_last_index, breaker = self.get_last_n_lines(self.path)
+                    try:
+                        for data in self.get_last_n_lines(self.path):
+                            if self.first_run == True:
+                                self.first_run = False
+                                self.update_overlay("Waiting for bounty", "white")
                             if not data and not self.first_run:
                                 continue
-                        except Exception as e:
-                            self.logger.info(f"Error reading EE.log1 {e}")
-                        if self.first_run:
-                            self.first_run = False
-                            text = "Waiting for bounty"
-                            self.update_overlay(text, "white")
-                        self.parse_lines(data)
-                        self.elapse(data)
-                        if self.parse_success:
-                            self.update_overlay("same", "same")
-                        self.last_line_index = current_last_index
+                            self.parse_lines(data)
+                            self.elapse(data)
+                            if self.parse_success:
+                                self.update_overlay("same", "same")
+                    except Exception as e:
+                        self.logger.info(f"Error reading EE.log1 {e}")
             except Exception as e:
                 self.logger.info(f"Error reading EE.log2 {e}")
                 time.sleep(1)
 
     def parse_lines(self, data):
-        for i in range(len(data)):
-            line_data = data[i].split()
-            if (len(line_data) <= 1):
+        for line in range(1):
+            line_data = data.split()
+            if not line_data:
                 continue
             try:
                 #Extract key line info and check conditions
@@ -317,8 +307,8 @@ class OverlayApp:
                 continue
                 
     def elapse(self, data):
-        for i in range(len(data)):
-            line_data = data[i].split()
+        for line in range(1):
+            line_data = data.split()
             if not line_data:
                 continue  # Skip empty lines
             
@@ -331,9 +321,10 @@ class OverlayApp:
             message = ' '.join(line_data[1:])
 
             try:
-                if message == 'Script [Info]: EidolonMP.lua: EIDOLONMP: Going back to hub':
-                    self.drone_time = self.drone_elapse = self.start_time = self.elapsed = self.stage_time = self.stage_elapse = 0
-                    self.drone_bool = self.start_bool = self.stage_bool = False
+                if message in ('Script [Info]: EidolonMP.lua: EIDOLONMP: Going back to hub',
+                               'Script [Info]: TopMenu.lua: Abort: host/no session'):
+                    self.start_time = self.elapsed = self.stage_time = self.stage_elapse = 0
+                    self.start_bool = self.stage_bool = False
                     self.counts = 0
                     self.parse_success = True
 
@@ -346,39 +337,33 @@ class OverlayApp:
                     self.start_bool = True
                     self.counts = 0
                     self.parse_success = True
-
-                elif 'Script [Info]: HudRedux.lua: Queuing new transmission:' in message:
+                elif 'Sys [Info]: GiveItem Queuing resource load for Transmission:' in message:
                     if "BountyFail" in message:
-                        self.drone_time = self.drone_elapse = self.start_time = self.elapsed = self.stage_time = self.stage_elapse = 0
-                        self.drone_bool = self.start_bool = self.stage_bool = False
+                        self.start_time = self.elapsed = self.stage_time = self.stage_elapse = 0
+                        self.start_bool = self.stage_bool = False
                         self.counts = 0
                     #Stage Start
                     elif any(stage in message for stage in self.stages_start):
-                        #print("Start")
-                        self.stage_start = self.drone_start = timestamp
-                        self.stage_time = self.drone_time = 0
+                        self.stage_start = timestamp
+                        self.stage_time = 0
                         self.stage_bool = True
                         stage = next((stage for stage in self.stages_start if stage in message), "")
                         self.stage = self.stages_translate_start[stage]
-                        # if "HijackIntro" in message:
-                        #     self.drone_bool = True
-                    #Stage End        
+                    #Stage End
                     elif any(stage in message for stage in self.stages_end):
-                        #print("End")
-                        self.stage_end = self.drone_end = timestamp
+                        self.stage_end = timestamp
                         if self.stage_start != 0:
                             self.stage_elapse = self.stage_end - self.stage_start
                         stage = next((stage for stage in self.stages_end if stage in message), "")
                         self.stage = self.stages_translate_end[stage]
-                        #print(f"Stage: {self.stage}")
                         if self.stage in self.stage_to_index:
                             index = self.stage_to_index[self.stage]
                             # Check the conditions for updating the best_stage_elapses
                             if (self.best_stage_elapses[index] == 0) or (self.stage_elapse <= self.best_stage_elapses[index]):
                                 if self.stage_elapse >= 0:
                                     self.best_stage_elapses[index] = round(self.stage_elapse, 3)
-                        self.stage_start = self.drone_start = 0
-                        self.stage_bool = self.drone_bool = False
+                        self.stage_start = 0
+                        self.stage_bool = False
                     self.parse_success = True
 
                 elif 'Script [Info]: EidolonMissionComplete.lua: EidolonMissionComplete:: Got Reward:' in message: 
@@ -390,7 +375,6 @@ class OverlayApp:
                         #Calculate elapsed time if conditions are met
                         if self.end > self.start:
                             self.elapsed = self.end - self.start
-                            #print(f"Start: {self.start}  End: {self.end}  Elapsed: {self.elapsed}")
                         if (self.best_elapsed == 0) or (self.elapsed <= self.best_elapsed):
                             self.best_elapsed = round(self.elapsed, 3)
                         if self.elapsed != self.elapsed_prev and self.elapsed != 0:
