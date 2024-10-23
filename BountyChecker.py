@@ -49,6 +49,11 @@ class OverlayApp:
         self.mean = 0  # Running average
         self.stage = ""
         self.best_stage_elapses = [0,0,0,0,0]
+        self.complete_start = self.reward = 0
+        self.complete = self.bugged = False
+
+        # Flags to track the visibility state
+        self.overlay_visible = True
 
         # Create labels
         self.label1 = tk.Label(self.root, text="", fg="white", bg="black",
@@ -58,16 +63,20 @@ class OverlayApp:
         self.label1.pack(fill="both", expand=True)
         self.label2.pack(fill="both", expand=True)
 
-        self.label1.bind("<Button-1>", self.start_drag)
-        self.label1.bind("<ButtonRelease-1>", self.stop_drag)
-        self.label1.bind("<B1-Motion>", self.on_drag)
-        self.label2.bind("<Button-1>", self.start_drag)
-        self.label2.bind("<ButtonRelease-1>", self.stop_drag)
-        self.label2.bind("<B1-Motion>", self.on_drag)
+        #Close the overlay when clicked
+        self.root.bind("<Enter>", self.on_enter)
+        self.root.bind("<Leave>", self.on_leave)
 
-        self.dragging = False
-        self.offset_x = 0
-        self.offset_y = 0
+        # self.label1.bind("<Button-1>", self.start_drag)
+        # self.label1.bind("<ButtonRelease-1>", self.stop_drag)
+        # self.label1.bind("<B1-Motion>", self.on_drag)
+        # self.label2.bind("<Button-1>", self.start_drag)
+        # self.label2.bind("<ButtonRelease-1>", self.stop_drag)
+        # self.label2.bind("<B1-Motion>", self.on_drag)
+
+        # self.dragging = False
+        # self.offset_x = 0
+        # self.offset_y = 0
 
         # # Configure window position
         self.width = max(self.label1.winfo_reqwidth(), self.label2.winfo_reqwidth()) + 2  # Add padding
@@ -89,20 +98,44 @@ class OverlayApp:
         self.wanted_bounties = json.loads(wanted_bounties.decode('utf-8'))
         self.bounty_translation = json.loads(bounty_translation.decode('utf-8'))
 
-    def start_drag(self, event):
-        self.dragging = True
-        self.offset_x = event.x
-        self.offset_y = event.y
+    def on_enter(self, event):
+        if self.overlay_visible:
+            self.root.withdraw()
+            self.overlay_visible = False  # Update the flag
 
-    def stop_drag(self, _):
-        self.dragging = False
+    def on_leave(self, event):
+        self.check_position()
 
-    def on_drag(self, event):
-        if self.dragging:
-            self.x = self.root.winfo_pointerx() - self.offset_x
-            self.y = self.root.winfo_pointery() - self.offset_y
-            self.center = self.x + (self.width/2)
-            self.root.geometry(f"+{int(self.x)}+{int(self.y)}")
+    def check_position(self):
+        # Check if the mouse is outside the geometry of the overlay
+        x1 = self.root.winfo_x()
+        y1 = self.root.winfo_y()
+        x2 = x1 + self.root.winfo_width()
+        y2 = y1 + self.root.winfo_height()
+
+        mouse_x, mouse_y = self.root.winfo_pointerxy()  # Get current mouse position
+        if not (x1 <= mouse_x <= x2 and y1 <= mouse_y <= y2):
+            if not self.overlay_visible:
+                self.root.deiconify()  # Show overlay if it's currently hidden
+                self.overlay_visible = True
+
+        # Check position again after a short delay
+        self.root.after(100, self.check_position)
+
+    # def start_drag(self, event):
+    #     self.dragging = True
+    #     self.offset_x = event.x
+    #     self.offset_y = event.y
+
+    # def stop_drag(self, _):
+    #     self.dragging = False
+
+    # def on_drag(self, event):
+    #     if self.dragging:
+    #         self.x = self.root.winfo_pointerx() - self.offset_x
+    #         self.y = self.root.winfo_pointery() - self.offset_y
+    #         self.center = self.x + (self.width/2)
+    #         self.root.geometry(f"+{int(self.x)}+{int(self.y)}")
 
     def get_last_n_lines(self, file_name):
         current_last_index = self.last_line_index
@@ -136,6 +169,9 @@ class OverlayApp:
         if text != 'same' and text_color != 'same':
             self.label1.config(text=text, fg=text_color)
 
+        if self.bugged:
+            self.label1.config(fg='red')
+
         best_stages = ""
         if self.stage in self.stage_to_index:
             index = self.stage_to_index[self.stage]
@@ -151,26 +187,23 @@ class OverlayApp:
         def append_milliseconds(time_str):
             return time_str[:11] if '.' in time_str else time_str + ".000"
 
-        finish = append_milliseconds(finish)
-        best = append_milliseconds(best)
-        mean = append_milliseconds(mean)
-        stage = append_milliseconds(stage)
-        best_stages = append_milliseconds(best_stages)
+        # Directly process each variable
+        finish, best, mean, stage, best_stages = (
+            append_milliseconds(var) for var in [finish, best, mean, stage, best_stages])
 
         # Update label with formatted string
         if best_stages == ".000":
-            self.label2.config(text=f" Bounties Completed: {self.bountycycles}  Timer: {finish}  "
-                                f"Best Time: {best}  Avg. Time: {mean} ")
+            text=f" Bounties Completed: {self.bountycycles}  Timer: {finish}  Best Time: {best}  Avg. Time: {mean} "
         else:
-            self.label2.config(text=f" Bounties Completed: {self.bountycycles}  Timer: {finish}  "
-                                f"Best Time: {best}  Avg. Time: {mean}  Stage Timer: {stage}  Best {self.stage}: {best_stages} ")
+            text=f" Bounties Completed: {self.bountycycles}  Timer: {finish}  Best Time: {best}  Avg. Time: {mean}  Stage Timer: {stage}  Best {self.stage}: {best_stages} "
+        self.label2.config(text=text)
 
         # Update window size
         self.root.update_idletasks()
         self.width = max(self.label1.winfo_reqwidth(), self.label2.winfo_reqwidth()) + 2  # Add padding
         height = 50    # Fixed height
 
-        # Calculate starting coordinates for the window
+        # Calculate coordinates for the window
         self.x = self.center - (self.width / 2)
 
         self.root.geometry(f'{self.width}x{height}+{int(self.x)}+{int(self.y)}')
@@ -205,8 +238,16 @@ class OverlayApp:
     def run(self):
         threading.Thread(target=self.clock).start()
         threading.Thread(target=self.data_parser).start()
+        threading.Thread(target=self.bug_checker).start()
         self.update_overlay("starting...", "white")
         self.root.mainloop()            
+
+    def bug_checker(self):
+        if self.complete:
+            time.sleep(0.1)
+            if self.reward < self.complete_start:
+                self.bugged = True
+            self.complete = False
 
     def clock(self):
         while True:
@@ -222,22 +263,18 @@ class OverlayApp:
     def data_parser(self):
         while True:
             try:
-                while True:
-                    time.sleep(0.1)
-                    self.parse_success = False
-                    try:
-                        for data in self.get_last_n_lines(self.path):
-                            if self.first_run == True:
-                                self.first_run = False
-                                self.update_overlay("Waiting for bounty", "white")
-                            if not data and not self.first_run:
-                                continue
-                            self.parse_lines(data)
-                            self.elapse(data)
-                            if self.parse_success:
-                                self.update_overlay("same", "same")
-                    except Exception as e:
-                        self.logger.info(f"Error reading EE.log1 {e}")
+                time.sleep(0.1)
+                self.parse_success = False
+                if self.first_run == True:
+                        self.first_run = False
+                        self.update_overlay("Waiting for bounty", "white")
+                for data in self.get_last_n_lines(self.path):
+                    if not data:
+                        continue
+                    self.parse_lines(data)
+                    self.elapse(data)
+                    if self.parse_success:
+                        self.update_overlay("same", "same")
             except Exception as e:
                 self.logger.info(f"Error reading EE.log2 {e}")
                 time.sleep(1)
@@ -253,8 +290,7 @@ class OverlayApp:
                 if line_key not in (
                     'Net [Info]: Set squad mission:',
                     'Script [Info]: ThemedSquadOverlay.lua: LoadLevelMsg received. Client joining mission in-progress:',
-                    'Net [Info]: MatchingServiceWeb::ProcessSquadMessage received MISSION message'
-                ):
+                    'Net [Info]: MatchingServiceWeb::ProcessSquadMessage received MISSION message'):
                     continue
                 
                 data_string = ' '.join(line_data[-1:])  # Capture the last part after splitting
@@ -265,8 +301,7 @@ class OverlayApp:
                 if any(index == -1 for index in [json_start_index, json_end_index]):
                     continue
                 json_data = data_string[json_start_index:json_end_index].replace(
-                    'null', 'None'.replace('true', 'True').replace('false', 'False').replace("True", '"True"')
-                )
+                    'null', 'None'.replace('true', 'True').replace('false', 'False').replace("True", '"True"'))
 
                 # Load the JSON
                 try:
@@ -321,27 +356,34 @@ class OverlayApp:
             message = ' '.join(line_data[1:])
 
             try:
-                if message in ('Script [Info]: EidolonMP.lua: EIDOLONMP: Going back to hub',
-                               'Script [Info]: TopMenu.lua: Abort: host/no session'):
+                if any(substring in message for substring in (
+                    'Script [Info]: EidolonMP.lua: EIDOLONMP: Going back to hub',
+                    'Script [Info]: TopMenu.lua: Abort:')):
                     self.start_time = self.elapsed = self.stage_time = self.stage_elapse = 0
                     self.start_bool = self.stage_bool = False
                     self.counts = 0
                     self.parse_success = True
+                    self.complete_start = self.reward = 0
+                    self.complete = self.bugged = False
 
                 elif message in (
                     'Net [Info]: MISSION_READY message: 1',
-                    'Net [Info]: SetSquadMissionReady(1)'
-                ):
+                    'Net [Info]: SetSquadMissionReady(1)'):
+                    #'Script [Info]: EidolonMP.lua: EIDOLONMP: WorldDoorTriggerFirstTouched.'):
                     self.start = timestamp
                     self.start_time = 0
                     self.start_bool = True
                     self.counts = 0
                     self.parse_success = True
+                    self.complete_start = self.reward = 0
+                    self.complete = self.bugged = False
                 elif 'Sys [Info]: GiveItem Queuing resource load for Transmission:' in message:
                     if "BountyFail" in message:
                         self.start_time = self.elapsed = self.stage_time = self.stage_elapse = 0
                         self.start_bool = self.stage_bool = False
                         self.counts = 0
+                        self.complete_start = self.reward = 0
+                        self.complete = self.bugged = False
                     #Stage Start
                     elif any(stage in message for stage in self.stages_start):
                         self.stage_start = timestamp
@@ -368,6 +410,7 @@ class OverlayApp:
 
                 elif 'Script [Info]: EidolonMissionComplete.lua: EidolonMissionComplete:: Got Reward:' in message: 
                     self.counts += 1
+                    self.reward = timestamp
                     if self.counts == self.stages_int:
                         self.end = timestamp
                         self.start_bool = False
@@ -382,7 +425,12 @@ class OverlayApp:
                             self.elapsed_prev = self.elapsed
                             print(f"Best Time: {self.best_elapsed} Avg. Time: {round(self.mean, 3)} Best Rescue: {self.best_stage_elapses[0]} Best Assassinate: {self.best_stage_elapses[1]} Best Capture: {self.best_stage_elapses[2]} Best Cache: {self.best_stage_elapses[3]} Best Drone: {self.best_stage_elapses[4]}")
                     self.parse_success = True
-                     
+
+                elif 'Sys [Info]: Created /Lotus/Interface/EidolonMissionComplete.swf' in message:
+                    if self.start_bool:
+                        self.complete_start = timestamp
+                        self.complete = True
+
             except Exception as e:
                 self.logger.error(f"Please Report this String5: {e} | Line: {line_data}")
 
