@@ -51,6 +51,7 @@ class OverlayApp:
         self.best_stage_elapses = [0,0,0,0,0]
         self.complete_start = self.reward = 0
         self.complete = self.bugged = False
+        self.host = False
 
         # Flags to track the visibility state
         self.overlay_visible = True
@@ -142,15 +143,15 @@ class OverlayApp:
 
         with open(file_name, 'r', encoding="utf-8", errors='ignore') as read_obj:
             # Move the cursor to the end of the file
-            # read_obj.seek(0, os.SEEK_END)
-            # # Get the current position of pointer i.e eof
-            # last_line = read_obj.tell()
-            # if current_last_index == 0:
-            #     self.last_line_index = last_line
-            #     return  # No lines to yield if the index is 0
+            read_obj.seek(0, os.SEEK_END)
+            # Get the current position of pointer i.e eof
+            last_line = read_obj.tell()
+            if current_last_index == 0:
+                self.last_line_index = last_line
+                return  # No lines to yield if the index is 0
             
-            # if last_line < current_last_index:
-            #     return  # Return early if there are no new lines
+            if last_line < current_last_index:
+                return  # Return early if there are no new lines
 
             while True:
                 read_obj.seek(self.last_line_index)
@@ -169,7 +170,7 @@ class OverlayApp:
         if text != 'same' and text_color != 'same':
             self.label1.config(text=text, fg=text_color)
 
-        if self.bugged:
+        if self.bugged or (self.host == True and self.bountycycles % 43 == 0):
             self.label1.config(fg='red')
 
         best_stages = ""
@@ -246,7 +247,8 @@ class OverlayApp:
         while True:
             time.sleep(0.1)
             if self.complete:
-                time.sleep(0.1)
+                time.sleep(1)
+                # Flags if no reward after stage
                 if self.reward < self.complete_start:
                     self.bugged = True
                 self.complete = False
@@ -296,6 +298,11 @@ class OverlayApp:
                     continue
                 
                 data_string = ' '.join(line_data[-1:])  # Capture the last part after splitting
+
+                if 'Net [Info]: Set squad mission:' in line_key:
+                    self.host = True
+                elif 'Net [Info]: MatchingServiceWeb::ProcessSquadMessage received MISSION message' in line_key:
+                    self.host = False
 
                 # Extract JSON data
                 json_start_index = data_string.find("{")
@@ -358,6 +365,7 @@ class OverlayApp:
             message = ' '.join(line_data[1:])
 
             try:
+                # Resets timers if aborted
                 if any(substring in message for substring in (
                     'Script [Info]: EidolonMP.lua: EIDOLONMP: Going back to hub',
                     'Script [Info]: TopMenu.lua: Abort:')):
@@ -368,10 +376,10 @@ class OverlayApp:
                     self.complete_start = self.reward = 0
                     self.complete = self.bugged = False
 
+                # Starts timer
                 elif message in (
                     'Net [Info]: MISSION_READY message: 1',
                     'Net [Info]: SetSquadMissionReady(1)'):
-                    #'Script [Info]: EidolonMP.lua: EIDOLONMP: WorldDoorTriggerFirstTouched.'):
                     self.start = timestamp
                     self.start_time = 0
                     self.start_bool = True
@@ -379,21 +387,26 @@ class OverlayApp:
                     self.parse_success = True
                     self.complete_start = self.reward = 0
                     self.complete = self.bugged = False
+
+                # Checks Transmissions
                 elif 'Sys [Info]: GiveItem Queuing resource load for Transmission:' in message:
+                    # Resets if bounty fails
                     if "BountyFail" in message:
                         self.start_time = self.elapsed = self.stage_time = self.stage_elapse = 0
                         self.start_bool = self.stage_bool = False
                         self.counts = 0
                         self.complete_start = self.reward = 0
                         self.complete = self.bugged = False
-                    #Stage Start
+                    
+                    # Stage Start
                     elif any(stage in message for stage in self.stages_start):
                         self.stage_start = timestamp
                         self.stage_time = 0
                         self.stage_bool = True
                         stage = next((stage for stage in self.stages_start if stage in message), "")
                         self.stage = self.stages_translate_start[stage]
-                    #Stage End
+                    
+                    # Stage End
                     elif any(stage in message for stage in self.stages_end):
                         self.stage_end = timestamp
                         if self.stage_start != 0:
@@ -410,6 +423,7 @@ class OverlayApp:
                         self.stage_bool = False
                     self.parse_success = True
 
+                # Increments after each reward
                 elif 'Script [Info]: EidolonMissionComplete.lua: EidolonMissionComplete:: Got Reward:' in message: 
                     self.counts += 1
                     self.reward = timestamp
@@ -428,6 +442,7 @@ class OverlayApp:
                             print(f"Best Time: {self.best_elapsed} Avg. Time: {round(self.mean, 3)} Best Rescue: {self.best_stage_elapses[0]} Best Assassinate: {self.best_stage_elapses[1]} Best Capture: {self.best_stage_elapses[2]} Best Cache: {self.best_stage_elapses[3]} Best Drone: {self.best_stage_elapses[4]}")
                     self.parse_success = True
 
+                # Checks if stage is completed
                 elif 'Sys [Info]: Created /Lotus/Interface/EidolonMissionComplete.swf' == message:
                     self.complete_start = timestamp
                     self.complete = True
