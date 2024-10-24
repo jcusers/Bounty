@@ -142,15 +142,15 @@ class OverlayApp:
 
         with open(file_name, 'r', encoding="utf-8", errors='ignore') as read_obj:
             # Move the cursor to the end of the file
-            read_obj.seek(0, os.SEEK_END)
-            # Get the current position of pointer i.e eof
-            last_line = read_obj.tell()
-            if current_last_index == 0:
-                self.last_line_index = last_line
-                return  # No lines to yield if the index is 0
+            # read_obj.seek(0, os.SEEK_END)
+            # # Get the current position of pointer i.e eof
+            # last_line = read_obj.tell()
+            # if current_last_index == 0:
+            #     self.last_line_index = last_line
+            #     return  # No lines to yield if the index is 0
             
-            if last_line < current_last_index:
-                return  # Return early if there are no new lines
+            # if last_line < current_last_index:
+            #     return  # Return early if there are no new lines
 
             while True:
                 read_obj.seek(self.last_line_index)
@@ -243,11 +243,13 @@ class OverlayApp:
         self.root.mainloop()            
 
     def bug_checker(self):
-        if self.complete:
+        while True:
             time.sleep(0.1)
-            if self.reward < self.complete_start:
-                self.bugged = True
-            self.complete = False
+            if self.complete:
+                time.sleep(0.1)
+                if self.reward < self.complete_start:
+                    self.bugged = True
+                self.complete = False
 
     def clock(self):
         while True:
@@ -426,10 +428,10 @@ class OverlayApp:
                             print(f"Best Time: {self.best_elapsed} Avg. Time: {round(self.mean, 3)} Best Rescue: {self.best_stage_elapses[0]} Best Assassinate: {self.best_stage_elapses[1]} Best Capture: {self.best_stage_elapses[2]} Best Cache: {self.best_stage_elapses[3]} Best Drone: {self.best_stage_elapses[4]}")
                     self.parse_success = True
 
-                elif 'Sys [Info]: Created /Lotus/Interface/EidolonMissionComplete.swf' in message:
-                    if self.start_bool:
-                        self.complete_start = timestamp
-                        self.complete = True
+                elif 'Sys [Info]: Created /Lotus/Interface/EidolonMissionComplete.swf' == message:
+                    self.complete_start = timestamp
+                    self.complete = True
+                    self.parse_success = True
 
             except Exception as e:
                 self.logger.error(f"Please Report this String5: {e} | Line: {line_data}")
