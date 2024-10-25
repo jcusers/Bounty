@@ -170,7 +170,7 @@ class OverlayApp:
         if text != 'same' and text_color != 'same':
             self.label1.config(text=text, fg=text_color)
 
-        if self.bugged or (self.host == True and self.bountycycles % 43 == 0):
+        if self.bugged or (self.host == True and self.bountycycles % 42 == 0):
             self.label1.config(fg='red')
 
         best_stages = ""
