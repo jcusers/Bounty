@@ -49,9 +49,9 @@ class OverlayApp:
         self.mean = 0  # Running average
         self.stage = ""
         self.best_stage_elapses = [0,0,0,0,0]
-        self.complete_start = self.reward = 0
         self.complete = self.bugged = False
         self.host = False
+        self.line_num = 0
 
         # Flags to track the visibility state
         self.overlay_visible = True
@@ -170,7 +170,7 @@ class OverlayApp:
         if text != 'same' and text_color != 'same':
             self.label1.config(text=text, fg=text_color)
 
-        if self.bugged or (self.host == True and self.bountycycles % 42 == 0):
+        if self.bugged or (self.host == True and self.bountycycles % 42 == 0 and self.bountycycles != 0):
             self.label1.config(fg='red')
 
         best_stages = ""
@@ -239,19 +239,8 @@ class OverlayApp:
     def run(self):
         threading.Thread(target=self.clock).start()
         threading.Thread(target=self.data_parser).start()
-        threading.Thread(target=self.bug_checker).start()
         self.update_overlay("starting...", "white")
-        self.root.mainloop()            
-
-    def bug_checker(self):
-        while True:
-            time.sleep(0.1)
-            if self.complete:
-                time.sleep(1)
-                # Flags if no reward after stage
-                if self.reward < self.complete_start:
-                    self.bugged = True
-                self.complete = False
+        self.root.mainloop()
 
     def clock(self):
         while True:
@@ -373,7 +362,6 @@ class OverlayApp:
                     self.start_bool = self.stage_bool = False
                     self.counts = 0
                     self.parse_success = True
-                    self.complete_start = self.reward = 0
                     self.complete = self.bugged = False
 
                 # Starts timer
@@ -385,7 +373,6 @@ class OverlayApp:
                     self.start_bool = True
                     self.counts = 0
                     self.parse_success = True
-                    self.complete_start = self.reward = 0
                     self.complete = self.bugged = False
 
                 # Checks Transmissions
@@ -395,7 +382,6 @@ class OverlayApp:
                         self.start_time = self.elapsed = self.stage_time = self.stage_elapse = 0
                         self.start_bool = self.stage_bool = False
                         self.counts = 0
-                        self.complete_start = self.reward = 0
                         self.complete = self.bugged = False
                     
                     # Stage Start
@@ -422,11 +408,26 @@ class OverlayApp:
                         self.stage_start = 0
                         self.stage_bool = False
                     self.parse_success = True
-
+                
+                if self.complete == True:
+                    self.line_num += 1
+                    #print(message)
+                    if self.line_num == 5:
+                        self.complete = False
+                        self.line_num = 0
+                        self.bugged = True
+                
+                # Checks if stage is completed
+                if 'Sys [Info]: Created /Lotus/Interface/EidolonMissionComplete.swf' == message:
+                    self.complete = True
+                    self.parse_success = True
+                    self.line_num = 0
+                    self.bugged = False
+                
                 # Increments after each reward
-                elif 'Script [Info]: EidolonMissionComplete.lua: EidolonMissionComplete:: Got Reward:' in message: 
+                if 'Script [Info]: EidolonMissionComplete.lua: EidolonMissionComplete:: Got Reward:' in message: 
                     self.counts += 1
-                    self.reward = timestamp
+                    self.complete = self.bugged = False
                     if self.counts == self.stages_int:
                         self.end = timestamp
                         self.start_bool = False
@@ -440,12 +441,6 @@ class OverlayApp:
                             self.calculate_running_average(self.elapsed)    
                             self.elapsed_prev = self.elapsed
                             print(f"Best Time: {self.best_elapsed} Avg. Time: {round(self.mean, 3)} Best Rescue: {self.best_stage_elapses[0]} Best Assassinate: {self.best_stage_elapses[1]} Best Capture: {self.best_stage_elapses[2]} Best Cache: {self.best_stage_elapses[3]} Best Drone: {self.best_stage_elapses[4]}")
-                    self.parse_success = True
-
-                # Checks if stage is completed
-                elif 'Sys [Info]: Created /Lotus/Interface/EidolonMissionComplete.swf' == message:
-                    self.complete_start = timestamp
-                    self.complete = True
                     self.parse_success = True
 
             except Exception as e:
